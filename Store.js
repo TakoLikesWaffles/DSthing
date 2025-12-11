@@ -8,4 +8,5 @@
     "entry": "Whiteboard/Launcher.py",
     "price": 0,
     "type": "Software"
-  },
+  }
+]
