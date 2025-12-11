@@ -1,15 +1,14 @@
-
-import sys, json, os
+import sys
+import json
+import os
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel, QColorDialog, QFileDialog,
-    QListWidget, QInputDialog, QComboBox, QSpinBox, QMessageBox
+    QListWidget, QInputDialog, QSpinBox, QMessageBox
 )
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
-from PyQt6.QtGui import (
-    QPixmap, QPainter, QPen, QColor, QBrush, QImage, 
-    QFont, QIcon, QPainterPath
-)
+from PyQt6.QtCore import Qt, QPoint, QRect
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
+
 
 class Layer:
     def __init__(self, name, width, height):
@@ -19,51 +18,50 @@ class Layer:
         self.canvas = QPixmap(width, height)
         self.canvas.fill(Qt.GlobalColor.transparent)
 
+
 class DrawingCanvas(QWidget):
     def __init__(self, width=1200, height=800):
         super().__init__()
         self.setFixedSize(width, height)
         self.width = width
         self.height = height
-        
+
         # Layers
         self.layers = [Layer("Background", width, height)]
         self.current_layer_index = 0
-        
+
         # Fill background with white
         painter = QPainter(self.layers[0].canvas)
         painter.fillRect(0, 0, width, height, Qt.GlobalColor.white)
         painter.end()
-        
+
         # Tool state
-        self.tool = "brush"  # brush, eraser, line, rect, circle, text, select, move
+        self.tool = "brush"
         self.drawing = False
         self.last_point = QPoint()
         self.start_point = QPoint()
-        
+
         # Brush settings
         self.pen_color = QColor(0, 0, 0)
         self.pen_width = 3
         self.pen_opacity = 255
-        
-        # History for undo/redo
+
+        # History
         self.history = []
         self.history_index = -1
         self.max_history = 50
-        
+
         # Text tool
-        self.text_content = ""
         self.text_size = 20
-        
+
         # Selection
         self.selection_rect = None
         self.selected_image = None
         self.move_offset = QPoint()
-        
+
         self.save_state()
 
     def save_state(self):
-        # Save current state for undo
         state = []
         for layer in self.layers:
             state.append({
@@ -72,11 +70,10 @@ class DrawingCanvas(QWidget):
                 'opacity': layer.opacity,
                 'canvas': layer.canvas.copy()
             })
-        
-        # Remove future history if we're not at the end
+
         if self.history_index < len(self.history) - 1:
             self.history = self.history[:self.history_index + 1]
-        
+
         self.history.append(state)
         if len(self.history) > self.max_history:
             self.history.pop(0)
@@ -114,18 +111,17 @@ class DrawingCanvas(QWidget):
             self.drawing = True
             self.last_point = event.pos()
             self.start_point = event.pos()
-            
+
             if self.tool == "text":
                 text, ok = QInputDialog.getText(self, "Text Input", "Enter text:")
                 if ok and text:
-                    self.text_content = text
-                    self.draw_text(event.pos())
+                    self.draw_text(event.pos(), text)
             elif self.tool == "select":
                 self.selection_rect = QRect(self.start_point, self.start_point)
 
     def mouseMoveEvent(self, event):
         if self.drawing and event.buttons() & Qt.MouseButton.LeftButton:
-            if self.tool == "brush" or self.tool == "eraser":
+            if self.tool in ["brush", "eraser"]:
                 self.draw_line(self.last_point, event.pos())
                 self.last_point = event.pos()
             elif self.tool == "select":
@@ -144,7 +140,7 @@ class DrawingCanvas(QWidget):
                 self.tool = "move"
             elif self.tool == "move" and self.selected_image:
                 self.paste_selection()
-            
+
             self.drawing = False
             if self.tool not in ["select", "move"]:
                 self.save_state()
@@ -152,15 +148,17 @@ class DrawingCanvas(QWidget):
     def draw_line(self, start, end):
         layer = self.get_current_layer()
         painter = QPainter(layer.canvas)
-        
+
         if self.tool == "eraser":
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            pen = QPen(Qt.GlobalColor.transparent, self.pen_width * 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            pen = QPen(Qt.GlobalColor.transparent, self.pen_width * 2, Qt.PenStyle.SolidLine,
+                       Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         else:
             color = QColor(self.pen_color)
             color.setAlpha(self.pen_opacity)
-            pen = QPen(color, self.pen_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        
+            pen = QPen(color, self.pen_width, Qt.PenStyle.SolidLine,
+                       Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+
         painter.setPen(pen)
         painter.drawLine(start, end)
         painter.end()
@@ -169,12 +167,12 @@ class DrawingCanvas(QWidget):
     def draw_shape(self, start, end):
         layer = self.get_current_layer()
         painter = QPainter(layer.canvas)
-        
+
         color = QColor(self.pen_color)
         color.setAlpha(self.pen_opacity)
         pen = QPen(color, self.pen_width)
         painter.setPen(pen)
-        
+
         if self.tool == "line":
             painter.drawLine(start, end)
         elif self.tool == "rect":
@@ -183,23 +181,20 @@ class DrawingCanvas(QWidget):
         elif self.tool == "circle":
             rect = QRect(start, end).normalized()
             painter.drawEllipse(rect)
-        
+
         painter.end()
         self.update()
 
-    def draw_text(self, pos):
-        if not self.text_content:
-            return
-        
+    def draw_text(self, pos, text):
         layer = self.get_current_layer()
         painter = QPainter(layer.canvas)
-        
+
         color = QColor(self.pen_color)
         color.setAlpha(self.pen_opacity)
         painter.setPen(color)
         painter.setFont(QFont("Arial", self.text_size))
-        painter.drawText(pos, self.text_content)
-        
+        painter.drawText(pos, text)
+
         painter.end()
         self.save_state()
         self.update()
@@ -208,10 +203,10 @@ class DrawingCanvas(QWidget):
         if self.selected_image and self.selection_rect:
             layer = self.get_current_layer()
             painter = QPainter(layer.canvas)
-            
+
             new_pos = self.selection_rect.topLeft() + self.move_offset
             painter.drawPixmap(new_pos, self.selected_image)
-            
+
             painter.end()
             self.selection_rect = None
             self.selected_image = None
@@ -221,21 +216,18 @@ class DrawingCanvas(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        
-        # Draw all visible layers
+
         for layer in self.layers:
             if layer.visible:
                 painter.setOpacity(layer.opacity / 100.0)
                 painter.drawPixmap(0, 0, layer.canvas)
-        
+
         painter.setOpacity(1.0)
-        
-        # Draw selection rectangle
+
         if self.selection_rect and self.tool == "select":
             painter.setPen(QPen(Qt.GlobalColor.blue, 2, Qt.PenStyle.DashLine))
             painter.drawRect(self.selection_rect)
-        
-        # Draw moving selection
+
         if self.selected_image and self.tool == "move":
             new_pos = self.selection_rect.topLeft() + self.move_offset
             painter.drawPixmap(new_pos, self.selected_image)
@@ -246,40 +238,30 @@ class DrawingCanvas(QWidget):
         self.save_state()
         self.update()
 
-    def fill_with_color(self, color):
-        layer = self.get_current_layer()
-        layer.canvas.fill(color)
-        self.save_state()
-        self.update()
 
 class WhiteboardApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Whiteboard - Drawing App")
         self.setGeometry(50, 50, 1400, 900)
-        
-        # Main widget
+
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
-        
-        # Left toolbar
+
         left_toolbar = self.create_left_toolbar()
         main_layout.addLayout(left_toolbar)
-        
-        # Canvas
+
         self.canvas = DrawingCanvas()
         main_layout.addWidget(self.canvas)
-        
-        # Right panel (layers)
+
         right_panel = self.create_right_panel()
         main_layout.addLayout(right_panel)
 
     def create_left_toolbar(self):
         toolbar = QVBoxLayout()
         toolbar.setSpacing(5)
-        
-        # Tools
+
         tools = [
             ("Brush", "brush"),
             ("Eraser", "eraser"),
@@ -289,20 +271,18 @@ class WhiteboardApp(QMainWindow):
             ("Text", "text"),
             ("Select", "select"),
         ]
-        
+
         for name, tool in tools:
             btn = QPushButton(name)
             btn.clicked.connect(lambda checked, t=tool: self.set_tool(t))
             toolbar.addWidget(btn)
-        
+
         toolbar.addWidget(QLabel("───────"))
-        
-        # Color picker
+
         color_btn = QPushButton("Color")
         color_btn.clicked.connect(self.pick_color)
         toolbar.addWidget(color_btn)
-        
-        # Brush size
+
         toolbar.addWidget(QLabel("Brush Size:"))
         self.size_slider = QSlider(Qt.Orientation.Horizontal)
         self.size_slider.setMinimum(1)
@@ -310,11 +290,10 @@ class WhiteboardApp(QMainWindow):
         self.size_slider.setValue(3)
         self.size_slider.valueChanged.connect(self.change_brush_size)
         toolbar.addWidget(self.size_slider)
-        
+
         self.size_label = QLabel("3")
         toolbar.addWidget(self.size_label)
-        
-        # Opacity
+
         toolbar.addWidget(QLabel("Opacity:"))
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setMinimum(0)
@@ -322,11 +301,10 @@ class WhiteboardApp(QMainWindow):
         self.opacity_slider.setValue(255)
         self.opacity_slider.valueChanged.connect(self.change_opacity)
         toolbar.addWidget(self.opacity_slider)
-        
+
         self.opacity_label = QLabel("100%")
         toolbar.addWidget(self.opacity_label)
-        
-        # Text size
+
         toolbar.addWidget(QLabel("Text Size:"))
         self.text_size_spin = QSpinBox()
         self.text_size_spin.setMinimum(8)
@@ -334,73 +312,66 @@ class WhiteboardApp(QMainWindow):
         self.text_size_spin.setValue(20)
         self.text_size_spin.valueChanged.connect(self.change_text_size)
         toolbar.addWidget(self.text_size_spin)
-        
+
         toolbar.addWidget(QLabel("───────"))
-        
-        # Undo/Redo
+
         undo_btn = QPushButton("Undo")
         undo_btn.clicked.connect(self.canvas.undo)
         toolbar.addWidget(undo_btn)
-        
+
         redo_btn = QPushButton("Redo")
         redo_btn.clicked.connect(self.canvas.redo)
         toolbar.addWidget(redo_btn)
-        
-        # Clear
+
         clear_btn = QPushButton("Clear Layer")
         clear_btn.clicked.connect(self.canvas.clear_canvas)
         toolbar.addWidget(clear_btn)
-        
+
         toolbar.addWidget(QLabel("───────"))
-        
-        # File operations
+
         save_btn = QPushButton("Save Project")
         save_btn.clicked.connect(self.save_project)
         toolbar.addWidget(save_btn)
-        
+
         load_btn = QPushButton("Load Project")
         load_btn.clicked.connect(self.load_project)
         toolbar.addWidget(load_btn)
-        
+
         export_btn = QPushButton("Export PNG")
         export_btn.clicked.connect(self.export_png)
         toolbar.addWidget(export_btn)
-        
+
         import_btn = QPushButton("Import Image")
         import_btn.clicked.connect(self.import_image)
         toolbar.addWidget(import_btn)
-        
+
         toolbar.addStretch()
         return toolbar
 
     def create_right_panel(self):
         panel = QVBoxLayout()
         panel.addWidget(QLabel("Layers"))
-        
-        # Layer list
+
         self.layer_list = QListWidget()
         self.layer_list.itemClicked.connect(self.select_layer)
         panel.addWidget(self.layer_list)
-        
-        # Layer buttons
+
         layer_btns = QHBoxLayout()
-        
+
         add_layer_btn = QPushButton("+")
         add_layer_btn.clicked.connect(self.add_layer)
         layer_btns.addWidget(add_layer_btn)
-        
+
         remove_layer_btn = QPushButton("-")
         remove_layer_btn.clicked.connect(self.remove_layer)
         layer_btns.addWidget(remove_layer_btn)
-        
+
         panel.addLayout(layer_btns)
-        
-        # Layer visibility
+
         visibility_btn = QPushButton("Toggle Visibility")
         visibility_btn.clicked.connect(self.toggle_layer_visibility)
         panel.addWidget(visibility_btn)
-        
-        # Layer opacity
+
         panel.addWidget(QLabel("Layer Opacity:"))
         self.layer_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.layer_opacity_slider.setMinimum(0)
@@ -408,18 +379,17 @@ class WhiteboardApp(QMainWindow):
         self.layer_opacity_slider.setValue(100)
         self.layer_opacity_slider.valueChanged.connect(self.change_layer_opacity)
         panel.addWidget(self.layer_opacity_slider)
-        
-        # Move layer up/down
+
         move_btns = QHBoxLayout()
         up_btn = QPushButton("↑ Up")
         up_btn.clicked.connect(self.move_layer_up)
         move_btns.addWidget(up_btn)
-        
+
         down_btn = QPushButton("↓ Down")
         down_btn.clicked.connect(self.move_layer_down)
         move_btns.addWidget(down_btn)
         panel.addLayout(move_btns)
-        
+
         self.update_layer_list()
         return panel
 
@@ -437,7 +407,7 @@ class WhiteboardApp(QMainWindow):
 
     def change_opacity(self, value):
         self.canvas.pen_opacity = value
-        self.opacity_label.setText(f"{int(value/255*100)}%")
+        self.opacity_label.setText(f"{int(value / 255 * 100)}%")
 
     def change_text_size(self, value):
         self.canvas.text_size = value
@@ -486,8 +456,7 @@ class WhiteboardApp(QMainWindow):
     def move_layer_up(self):
         idx = self.canvas.current_layer_index
         if idx < len(self.canvas.layers) - 1:
-            self.canvas.layers[idx], self.canvas.layers[idx + 1] = \
-                self.canvas.layers[idx + 1], self.canvas.layers[idx]
+            self.canvas.layers[idx], self.canvas.layers[idx + 1] = self.canvas.layers[idx + 1], self.canvas.layers[idx]
             self.canvas.current_layer_index += 1
             self.update_layer_list()
             self.canvas.update()
@@ -495,8 +464,7 @@ class WhiteboardApp(QMainWindow):
     def move_layer_down(self):
         idx = self.canvas.current_layer_index
         if idx > 0:
-            self.canvas.layers[idx], self.canvas.layers[idx - 1] = \
-                self.canvas.layers[idx - 1], self.canvas.layers[idx]
+            self.canvas.layers[idx], self.canvas.layers[idx - 1] = self.canvas.layers[idx - 1], self.canvas.layers[idx]
             self.canvas.current_layer_index -= 1
             self.update_layer_list()
             self.canvas.update()
@@ -504,9 +472,7 @@ class WhiteboardApp(QMainWindow):
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Project", "", "Whiteboard Project (*.wbp)")
         if path:
-            data = {
-                'layers': []
-            }
+            data = {'layers': []}
             for layer in self.canvas.layers:
                 img_path = path.replace('.wbp', f'_layer_{layer.name}.png')
                 layer.canvas.save(img_path)
@@ -516,10 +482,10 @@ class WhiteboardApp(QMainWindow):
                     'opacity': layer.opacity,
                     'image': os.path.basename(img_path)
                 })
-            
+
             with open(path, 'w') as f:
                 json.dump(data, f, indent=2)
-            
+
             QMessageBox.information(self, "Saved", "Project saved successfully!")
 
     def load_project(self):
@@ -527,21 +493,21 @@ class WhiteboardApp(QMainWindow):
         if path:
             with open(path, 'r') as f:
                 data = json.load(f)
-            
+
             self.canvas.layers.clear()
             base_path = os.path.dirname(path)
-            
+
             for layer_data in data['layers']:
                 layer = Layer(layer_data['name'], self.canvas.width, self.canvas.height)
                 layer.visible = layer_data['visible']
                 layer.opacity = layer_data['opacity']
-                
+
                 img_path = os.path.join(base_path, layer_data['image'])
                 if os.path.exists(img_path):
                     layer.canvas = QPixmap(img_path)
-                
+
                 self.canvas.layers.append(layer)
-            
+
             self.canvas.current_layer_index = 0
             self.update_layer_list()
             self.canvas.update()
@@ -550,16 +516,15 @@ class WhiteboardApp(QMainWindow):
     def export_png(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export PNG", "", "PNG Image (*.png)")
         if path:
-            # Merge all visible layers
             result = QPixmap(self.canvas.width, self.canvas.height)
             result.fill(Qt.GlobalColor.transparent)
             painter = QPainter(result)
-            
+
             for layer in self.canvas.layers:
                 if layer.visible:
                     painter.setOpacity(layer.opacity / 100.0)
                     painter.drawPixmap(0, 0, layer.canvas)
-            
+
             painter.end()
             result.save(path)
             QMessageBox.information(self, "Exported", "Image exported successfully!")
@@ -574,6 +539,7 @@ class WhiteboardApp(QMainWindow):
             painter.end()
             self.canvas.save_state()
             self.canvas.update()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
